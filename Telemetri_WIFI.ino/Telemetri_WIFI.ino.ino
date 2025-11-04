@@ -26,7 +26,7 @@ AS5600 leftEncoder(&Wire1);
 #define WIFI_PASSWRD "password1234"
 
 // Define the control loop period, in ms.
-#define CONTROL_LOOP_PERIOD 5
+#define CONTROL_LOOP_PERIOD 3
 #define TAU 100.0e-3  //en s
 
 // Définition des Pins
@@ -64,7 +64,7 @@ float OmegaG_prev = 0;
 
 // Les Tensions utiles
 float U;
-float Vbatt = 11.1;
+float Vbatt = 11.2;
 
 // Coeff du filtre dérivateur
 float a1 =-(1 - 2*TAU / (CONTROL_LOOP_PERIOD*0.001));
@@ -115,12 +115,14 @@ void setup() {
       isInit = false;
     }
 
+    // Initialise AVANT de filtrer pour éviter d'avoir une vitesse initiale aberrante et faussée (l'écart initial Delta Thêta serait environ égal à Thêta(N+1) et non à zéro)
     multiplexer.setPort(RIGHT_ENCODER_PIN);
     RawAngle[0] = rightEncoder.getCumulativePosition() * AS5600_RAW_TO_DEGREES;
-
+    CumulativePosRight = RawAngle[0];
     multiplexer.setPort(LEFT_ENCODER_PIN);
     RawAngle[1] = leftEncoder.getCumulativePosition() * AS5600_RAW_TO_DEGREES;
-    
+    CumulativePosLeft = RawAngle[1];
+
     OmegaD_prev = 0;
     OmegaG_prev = 0;
 
@@ -222,18 +224,21 @@ void mecatro::controlLoop()
     delta=0;
   }*/
   
-  if (1000<compteur && compteur<5000){
+  if (500<compteur && compteur<1000) {    //  6 x 2 mesures en créneau à 0.5, 0.4, 0.3
     delta = 0.2;
+  } else if (1500<=compteur && compteur < 2000) {
+    delta = 0.5;
   } else {
-    delta = 0;
+    delta=0.0;
   }
-  
+
+  //delta=PosSensorBar/0.0458;
   U=delta*Vbatt; // Vbatt = tension batterie, la tension fournie au moteur est celle de la batterie modulée par le PWM du shield  
   mecatro::setMotorDutyCycle(0.0,delta);  // gauche = moteur gauche (+) | droite = moteur droit (-)
 
   
-  mecatro::log(0,RawAngle[0]);
-  mecatro::log(1,RawAngle[1]);
+  mecatro::log(0,RawAngle[0]-CumulativePosRight); // soustraire la valeur initiale, pour commencer à 0
+  mecatro::log(1,RawAngle[1]-CumulativePosLeft);
   mecatro::log(2,OmegaD);
   mecatro::log(3,OmegaG);
   mecatro::log(4,PosSensorBar); 
