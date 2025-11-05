@@ -50,8 +50,7 @@ float speed=0.0;
 float delta=0.0;
 float compteur=0;
 
-float PosSensorBar_new = 0.0;
-float dlambda = 0.0;
+float lambda = 0.0;
 
 float RawAngle[2]={0.0,0.0};
 float RawAngle_new[2]={0.0,0.0};
@@ -75,7 +74,7 @@ float b1 = (1 + 2*TAU / (CONTROL_LOOP_PERIOD*0.001));
 float alpha_u = 1;
 float beta_u = 1;
 float p = 0.04;         // rayon des roues, en m
-float u_barre = 0.2 ;   // vitesse d'équilibre souhaitée, en m/s
+float u_barre = 0.02 ;   // vitesse d'équilibre souhaitée, en m/s
 
 // Variables d'état du controleur
 float dt = CONTROL_LOOP_PERIOD*0.001;   // pas de temps en secondes 
@@ -83,9 +82,9 @@ float eta_u = 0.0;   // intégrateur
 float u = 0.0;  // la vitesse du robot
 
 
-void Controleur(float dlambda, float OmegaD, float OmegaG, float *U_plus, float *U_moins, float *u) {  // on modifie via des références les U, appel via &U
+void Controleur(float lambda, float OmegaD, float OmegaG, float *U_plus, float *U_moins, float *u) {  // on modifie via des références les U, appel via &U
   // Calcul de U_moins
-  float dU_moins = -K_moins * dlambda;
+  float dU_moins = -K_moins * lambda;
   *U_moins += dU_moins;
 
   // Calcul de U_plus
@@ -123,9 +122,7 @@ void setup() {
       Serial.println("sx1509 IC communication FAILED!");
       isInit = false;
     }
-
-    // Initialisation de la position pour la 1ère itération
-    PosSensorBar = mySensorBar.getPosition()*0.0458/127;  
+  
 
     multiplexer.setPort(RIGHT_ENCODER_PIN);
     rightEncoder.begin();
@@ -159,7 +156,7 @@ void setup() {
       // Initialisation télémétrie
     
       unsigned int const nVariables = 10;
-      String variableNames[nVariables] = {"angleDroite","angleGauche","Omega Droite","Omega Gauche","SensorBar","dlambda","U","u","U_plus","U_moins"};
+      String variableNames[nVariables] = {"angleDroite","angleGauche","Omega Droite","Omega Gauche","SensorBar","lambda","U","u","U_plus","U_moins"};
       mecatro::initTelemetry(WIFI_SSID, WIFI_PASSWRD, nVariables, variableNames, CONTROL_LOOP_PERIOD);
       // ATTENTION Après, plus de Serial.print > car mauvais ordre pour Matlab, mais on peut en mettre avant
       // InitTelemetry allume puis éteint les LEDs > checks 
@@ -190,8 +187,8 @@ void mecatro::controlLoop()
   
   // SensorBar
   multiplexer.setPort(SENSORBAR_PIN);
-  PosSensorBar_new = mySensorBar.getPosition()*0.0458/127;   // renvoie un nombre entre +127 (distance à droite) et -127 (distance à gauche) sur 9.16 cm soit 127 = 0.0458 m
-  dlambda = PosSensorBar-PosSensorBar_new;
+  PosSensorBar = mySensorBar.getPosition()*0.0458/127;   // renvoie un nombre entre +127 (distance à droite) et -127 (distance à gauche) sur 9.16 cm soit 127 = 0.0458 m
+  lambda = PosSensorBar;
 
   // Encodeur de droite
   multiplexer.setPort(RIGHT_ENCODER_PIN);
@@ -200,7 +197,8 @@ void mecatro::controlLoop()
 
   // Encodeur de gauche
   multiplexer.setPort(LEFT_ENCODER_PIN);
-  RawAngle_new[1] =leftEncoder.getCumulativePosition() * AS5600_RAW_TO_DEGREES;
+
+  RawAngle_new[1] = leftEncoder.getCumulativePosition() * AS5600_RAW_TO_DEGREES;
  
   // Vitesses 
   OmegaD = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[0]-RawAngle[0]) + a1 * OmegaD_prev)/b1;
@@ -236,21 +234,21 @@ void mecatro::controlLoop()
   //delta=PosSensorBar/0.0458;
 
   // Appel au controleur
-  Controleur(dlambda, OmegaD, OmegaG, &U_plus, &U_moins, &u);
-  float delta_d = (U_plus + U_moins)/Vbatt;
-  float delta_g = (U_plus - U_moins)/Vbatt;
+  Controleur(lambda, OmegaD, OmegaG, &U_plus, &U_moins, &u);
+  float delta_d = (U_plus + U_moins)/2/Vbatt; 
+  float delta_g = (U_plus - U_moins)/2/Vbatt;
   U=delta*Vbatt;              // Vbatt = tension batterie, la tension fournie au moteur est celle de la batterie modulée par le PWM du shield  
 
   // Keep the motor off, i.e. at 0 duty cycle (1 is full forward (i.e. trigonometric sense in the motor frame), -1 full reverse)
-  mecatro::setMotorDutyCycle(delta_g,-delta_d);  // gauche = moteur gauche (+) | droite = moteur droit (-)
+  mecatro::setMotorDutyCycle(delta_g,delta_d);  // gauche = moteur droit (-) | droite = moteur gauche (-)
 
   // Envoie des données utiles
   mecatro::log(0,RawAngle[0]-CumulativePosRight_0); // soustraire la valeur initiale, pour commencer à 0
   mecatro::log(1,RawAngle[1]-CumulativePosLeft_0);
   mecatro::log(2,OmegaD);
   mecatro::log(3,OmegaG);
-  mecatro::log(4,PosSensorBar_new); 
-  mecatro::log(5,dlambda);
+  mecatro::log(4,PosSensorBar); 
+  mecatro::log(5,lambda);   // lambda = PosSensorBar, inutile
   mecatro::log(6,U);
   mecatro::log(7,u);
   mecatro::log(8,U_plus);
@@ -262,7 +260,6 @@ void mecatro::controlLoop()
   }
   OmegaG_prev = OmegaG;
   OmegaD_prev = OmegaD;
-  PosSensorBar = PosSensorBar_new;
 }
 
 
