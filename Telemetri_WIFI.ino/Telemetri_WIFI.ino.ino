@@ -35,11 +35,14 @@ SensorBar mySensorBar(0x3E);
 #define RIGHT_ENCODER_PIN 7  // branchement sur le Main côté PIN 4
 #define LEFT_ENCODER_PIN 0
 
+#define PI 3.1415926
+#define DEG_TO_RAD 2*PI/360
 // Les gains à recevoir de MatLab
 float Kp = 1;
 float Ki = 1;
 float K_moins = 1 ;
-
+float K_lambda = 1;
+float Vbatt = 11.2;
 
 // Définition des variables utiles
 float PosSensorBar = 0.0;
@@ -60,12 +63,6 @@ float OmegaG = 0.0;
 float OmegaD_prev = 0.0;  // les vitesses précédentes
 float OmegaG_prev = 0.0;
 
-// Les Tensions utiles
-float U;
-float Vbatt = 11.2;
-float U_plus = 0.0;
-float U_moins = 0.0;
-
 // Coeff du filtre dérivateur
 float a1 =-(1 - 2*TAU / (CONTROL_LOOP_PERIOD*0.001));
 float b1 = (1 + 2*TAU / (CONTROL_LOOP_PERIOD*0.001));
@@ -74,25 +71,35 @@ float b1 = (1 + 2*TAU / (CONTROL_LOOP_PERIOD*0.001));
 float alpha_u = 1;
 float beta_u = 1;
 float p = 0.04;         // rayon des roues, en m
-float u_barre = 0.02 ;   // vitesse d'équilibre souhaitée, en m/s
+float u_barre = 0.2 ;   // vitesse d'équilibre souhaitée, en m/s
 
 // Variables d'état du controleur
 float dt = CONTROL_LOOP_PERIOD*0.001;   // pas de temps en secondes 
 float eta_u = 0.0;   // intégrateur
+float eta_lambda = 0.0;
 float u = 0.0;  // la vitesse du robot
+
+// Les Tensions utiles
+float U;
+float U_plus = 0.0;
+float U_plus_barre=2.14*u_barre;  //2.14 faux
+float U_moins = 0.0;
 
 
 void Controleur(float lambda, float OmegaD, float OmegaG, float *U_plus, float *U_moins, float *u) {  // on modifie via des références les U, appel via &U
-  // Calcul de U_moins
-  float dU_moins = -K_moins * lambda;
-  *U_moins += dU_moins;
+  // Calcul de U_moins via PI
+  eta_lambda += lambda*dt;
+  float dU_moins = -K_moins * lambda - K_lambda*eta_lambda;
+  *U_moins = dU_moins;  // U_moins_barre=0
+  *U_moins = constrain(*U_moins, -12.0, 12.0);
 
-  // Calcul de U_plus
+  // Calcul de U_plus via PI
   *u = p * (OmegaD + OmegaG) / 2.0;  // vitesse instantanée
   float du = u_barre - *u;                 // écart 
   eta_u += du * dt;                       // intégration
-  float dU_plus = -Ki * eta_u - Kp * du;
-  *U_plus += dU_plus;
+  float dU_plus = -Ki * eta_u - Kp * du;   // écart à la valeur d'équilibre
+  *U_plus = U_plus_barre+dU_plus;   
+  *U_plus = constrain(*U_plus, -12.0, 12.0); // évite la saturation
 }
 
 void setup() {
@@ -162,12 +169,14 @@ void setup() {
       // InitTelemetry allume puis éteint les LEDs > checks 
 
       // Reception par télémétrie
-      float floatArray[3]; // même nombre qu'on envoie
-      mecatro::recieveGains(3, floatArray);
+      float floatArray[5]; // même nombre qu'on envoie
+      mecatro::recieveGains(5, floatArray);
       // On update les gains
       K_moins = floatArray[0];
       Kp = floatArray[1];
       Ki = floatArray[2];
+      K_lambda = floatArray[3];
+      Vbatt = floatArray[4];
 
       // Set I2C clock speed to 400kHz (fast mode). Do it after initializing everyone so that the clock speed
       // is not reset by a particular device. 
@@ -201,8 +210,8 @@ void mecatro::controlLoop()
   RawAngle_new[1] = leftEncoder.getCumulativePosition() * AS5600_RAW_TO_DEGREES;
  
   // Vitesses 
-  OmegaD = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[0]-RawAngle[0]) + a1 * OmegaD_prev)/b1;
-  OmegaG = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[1]-RawAngle[1]) + a1 * OmegaG_prev)/b1;
+  OmegaD = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[0]-RawAngle[0])*DEG_TO_RAD + a1 * OmegaD_prev)/b1;   // rad/s                                                                       // rad/s
+  OmegaG = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[1]-RawAngle[1])*DEG_TO_RAD + a1 * OmegaG_prev)/b1;
 
   
   compteur+=CONTROL_LOOP_PERIOD;
@@ -235,12 +244,12 @@ void mecatro::controlLoop()
 
   // Appel au controleur
   Controleur(lambda, OmegaD, OmegaG, &U_plus, &U_moins, &u);
-  float delta_d = (U_plus + U_moins)/2/Vbatt; 
-  float delta_g = (U_plus - U_moins)/2/Vbatt;
+  float delta_d = (U_plus + U_moins)/Vbatt*1.06; //1.06 facteur correctif
+  float delta_g = (U_plus - U_moins)/Vbatt;     // facteur 2 arthur ??
   U=delta*Vbatt;              // Vbatt = tension batterie, la tension fournie au moteur est celle de la batterie modulée par le PWM du shield  
 
   // Keep the motor off, i.e. at 0 duty cycle (1 is full forward (i.e. trigonometric sense in the motor frame), -1 full reverse)
-  mecatro::setMotorDutyCycle(delta_g,delta_d);  // gauche = moteur droit (-) | droite = moteur gauche (-)
+  mecatro::setMotorDutyCycle(-delta_g,-delta_d);  // gauche = moteur gauche (-) | droite = moteur droit (-)
 
   // Envoie des données utiles
   mecatro::log(0,RawAngle[0]-CumulativePosRight_0); // soustraire la valeur initiale, pour commencer à 0
