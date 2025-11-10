@@ -38,10 +38,11 @@ SensorBar mySensorBar(0x3E);
 #define PI 3.1415926
 #define DEG_TO_RAD 2*PI/360
 // Les gains à recevoir de MatLab
-float Kp = 1;
-float Ki = 1;
+float Kp = -1;
+float Ki = -1;
 float K_moins = 1 ;
 float K_lambda = 1;
+float K_psi = 1;
 float Vbatt = 11.2;
 
 // Définition des variables utiles
@@ -54,6 +55,7 @@ float delta=0.0;
 float compteur=0;
 
 float lambda = 0.0;
+float psi = 0.0;
 
 float RawAngle[2]={0.0,0.0};
 float RawAngle_new[2]={0.0,0.0};
@@ -71,7 +73,11 @@ float b1 = (1 + 2*TAU / (CONTROL_LOOP_PERIOD*0.001));
 float alpha_u = 1;
 float beta_u = 1;
 float p = 0.04;         // rayon des roues, en m
-float u_barre = 0.2 ;   // vitesse d'équilibre souhaitée, en m/s
+float l = 0.187;         // distance entre les roues, en m
+float u_barre = 0.1;   // vitesse d'équilibre souhaitée, en m/s
+float k = 0.338;        // constante du moteur
+
+float coef=1;
 
 // Variables d'état du controleur
 float dt = CONTROL_LOOP_PERIOD*0.001;   // pas de temps en secondes 
@@ -82,23 +88,23 @@ float u = 0.0;  // la vitesse du robot
 // Les Tensions utiles
 float U;
 float U_plus = 0.0;
-float U_plus_barre=2.14*u_barre;  //2.14 faux
+float U_plus_barre=1;  // vraie initialisation plus tard, U_moins_barre = 0
 float U_moins = 0.0;
 
 
-void Controleur(float lambda, float OmegaD, float OmegaG, float *U_plus, float *U_moins, float *u) {  // on modifie via des références les U, appel via &U
-  // Calcul de U_moins via PI
+void Controleur(float lambda, float OmegaD, float OmegaG, float *U_plus, float *U_moins, float *u, float psi) {  // on modifie via des références les U, appel via &U
+  // Calcul de U_moins via PI (écart à la ligne)
   eta_lambda += lambda*dt;
-  float dU_moins = -K_moins * lambda - K_lambda*eta_lambda;
+  float dU_moins = -K_moins * lambda - K_lambda*eta_lambda - K_psi*psi;  // coeff positifs  car si lambda<0, on veut augmenter Ur donc U_moins
   *U_moins = dU_moins;  // U_moins_barre=0
   *U_moins = constrain(*U_moins, -12.0, 12.0);
 
-  // Calcul de U_plus via PI
+  // Calcul de U_plus via PI (translation)
   *u = p * (OmegaD + OmegaG) / 2.0;  // vitesse instantanée
   float du = u_barre - *u;                 // écart 
   eta_u += du * dt;                       // intégration
-  float dU_plus = -Ki * eta_u - Kp * du;   // écart à la valeur d'équilibre
-  *U_plus = U_plus_barre+dU_plus;   
+  float dU_plus = -Ki * eta_u - Kp * du;   // écart à la valeur d'équilibre, coeff négatifs car si du<0 ie vitesse trop faible, on veut augmenter U_plus
+  *U_plus = U_plus_barre + dU_plus;   
   *U_plus = constrain(*U_plus, -12.0, 12.0); // évite la saturation
 }
 
@@ -163,20 +169,25 @@ void setup() {
       // Initialisation télémétrie
     
       unsigned int const nVariables = 10;
-      String variableNames[nVariables] = {"angleDroite","angleGauche","Omega Droite","Omega Gauche","SensorBar","lambda","U","u","U_plus","U_moins"};
+      String variableNames[nVariables] = {"angleDroite","angleGauche","Omega Droite","Omega Gauche","lambda","delta_d","delta_g","u","U_plus","U_moins"};
       mecatro::initTelemetry(WIFI_SSID, WIFI_PASSWRD, nVariables, variableNames, CONTROL_LOOP_PERIOD);
       // ATTENTION Après, plus de Serial.print > car mauvais ordre pour Matlab, mais on peut en mettre avant
       // InitTelemetry allume puis éteint les LEDs > checks 
 
       // Reception par télémétrie
-      float floatArray[5]; // même nombre qu'on envoie
-      mecatro::recieveGains(5, floatArray);
+      float floatArray[8]; // même nombre qu'on envoie
+      mecatro::recieveGains(8, floatArray);
       // On update les gains
       K_moins = floatArray[0];
       Kp = floatArray[1];
       Ki = floatArray[2];
       K_lambda = floatArray[3];
       Vbatt = floatArray[4];
+      coef = floatArray[5];
+      u_barre = floatArray[6];
+      K_psi = floatArray[7];
+
+      U_plus_barre=2*k*u_barre/p;  // cf la relation dynamique_bolide.pdf
 
       // Set I2C clock speed to 400kHz (fast mode). Do it after initializing everyone so that the clock speed
       // is not reset by a particular device. 
@@ -208,7 +219,10 @@ void mecatro::controlLoop()
   multiplexer.setPort(LEFT_ENCODER_PIN);
 
   RawAngle_new[1] = leftEncoder.getCumulativePosition() * AS5600_RAW_TO_DEGREES;
- 
+
+  // Calcul de psi
+  psi = p*(RawAngle_new[0]-RawAngle_new[1])/l;
+
   // Vitesses 
   OmegaD = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[0]-RawAngle[0])*DEG_TO_RAD + a1 * OmegaD_prev)/b1;   // rad/s                                                                       // rad/s
   OmegaG = (2.0/(CONTROL_LOOP_PERIOD*0.001)*(RawAngle_new[1]-RawAngle[1])*DEG_TO_RAD + a1 * OmegaG_prev)/b1;
@@ -243,10 +257,10 @@ void mecatro::controlLoop()
   //delta=PosSensorBar/0.0458;
 
   // Appel au controleur
-  Controleur(lambda, OmegaD, OmegaG, &U_plus, &U_moins, &u);
-  float delta_d = (U_plus + U_moins)/Vbatt*1.06; //1.06 facteur correctif
+  Controleur(lambda, OmegaD, OmegaG, &U_plus, &U_moins, &u, psi);
+  float delta_d = (U_plus + U_moins)/Vbatt*coef; // coef : facteur correctif
   float delta_g = (U_plus - U_moins)/Vbatt;     // facteur 2 arthur ??
-  U=delta*Vbatt;              // Vbatt = tension batterie, la tension fournie au moteur est celle de la batterie modulée par le PWM du shield  
+
 
   // Keep the motor off, i.e. at 0 duty cycle (1 is full forward (i.e. trigonometric sense in the motor frame), -1 full reverse)
   mecatro::setMotorDutyCycle(-delta_g,-delta_d);  // gauche = moteur gauche (-) | droite = moteur droit (-)
@@ -256,9 +270,9 @@ void mecatro::controlLoop()
   mecatro::log(1,RawAngle[1]-CumulativePosLeft_0);
   mecatro::log(2,OmegaD);
   mecatro::log(3,OmegaG);
-  mecatro::log(4,PosSensorBar); 
-  mecatro::log(5,lambda);   // lambda = PosSensorBar, inutile
-  mecatro::log(6,U);
+  mecatro::log(4,lambda); 
+  mecatro::log(5,delta_d);   // lambda = PosSensorBar, inutile
+  mecatro::log(6,delta_g);
   mecatro::log(7,u);
   mecatro::log(8,U_plus);
   mecatro::log(9,U_moins);
