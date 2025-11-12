@@ -6,6 +6,7 @@ k = 0.338;    % V.s
 
 Ir_1_all = [];  % vecteur pour stocker les Ir_1
 Ir_2_all = [];  % vecteur pour stocker les Ir_2
+nu_all=[];
 file_names = {}; % pour stocker les noms de fichiers correspondants
 a_all = [];      % vecteur pour stocker les valeurs de a
 b_all = [];      % vecteur pour stocker les valeurs de b
@@ -45,10 +46,12 @@ for i = 1:3
         % Calculs des inerties
         Ir_1 = 1/(eta*eta)*(k*eta/(R*a_est)-Iw);
         Ir_2 = 1/(eta*eta)*((k*eta)^2/(R*b_est(2))-Iw);
+        nu=best(2)*(Iw+eta^2*Ir_1)*R/((k*eta)^2);
 
         % Stockage des résultats
         Ir_1_all = [Ir_1_all; Ir_1];
         Ir_2_all = [Ir_2_all; Ir_2];
+        nu_all = [nu_all; nu]
         file_names{end+1} = file_name;
 
         % Affichage formaté en notation scientifique (3 chiffres significatifs)
@@ -61,12 +64,14 @@ end
 %% --- Moyennes finales ---
 Ir_1_mean = mean(Ir_1_all);  
 Ir_2_mean = mean(Ir_2_all);  
+nu_mean = mean(nu_all);
 a_mean = mean(a_all);
 b_mean = mean(b_all);
 
 fprintf('\n=== Moyennes des résultats ===\n');
 fprintf('Moyenne Ir_1 = %.3e\n', Ir_1_mean);
 fprintf('Moyenne Ir_2 = %.3e\n', Ir_2_mean);
+fprintf('Moyenne nu = %.3e\n', nu_mean);
 fprintf('Moyenne a = %.3e\n', a_mean);
 fprintf('Moyenne b = %.3e\n', b_mean);
 
