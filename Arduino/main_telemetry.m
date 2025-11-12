@@ -14,14 +14,14 @@ Tmax = 10;
 method = 'WiFi';
 
 %Gains
-K_moins= 300;
+K_moins= 200; %450  200
 Kp= -30;
 Ki= -8;
-K_lambda = 11;
-K_psi= 0.05;  %0.31
+K_lambda = 11;  %11
+K_psi= 0.002;  % 0.005 0.002?
 Vbatt=11.2;
-coef=1.05;
-u_barre=0.30; % problème de friction
+coef=1.038;
+u_barre=0.4; % problème de friction
 K = [K_moins Kp Ki K_lambda Vbatt coef u_barre K_psi];  
 
 if strcmp(method,'WiFi')
@@ -53,8 +53,8 @@ disp(data_values.keys)
 
 % figure
 % hold on;
-% plot(log_time, data_values("U_plus"), 'DisplayName', "U_plus");
-% plot(log_time, data_values("U_moins"), 'DisplayName', "U_moins");
+% plot(log_time, data_values("Omega Droite"), 'DisplayName', "Droite");
+% plot(log_time, data_values("Omega Gauche"), 'DisplayName', "Gauche");
 % hold off;
 % legend('Location', 'best');
 % grid on;
